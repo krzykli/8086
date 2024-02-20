@@ -31,14 +31,16 @@
                     "test",
                     "--no-run",
                     "--bin=decode8086",
-                    "--package=decode8086"
+                    "--package=decode8086",
+                    "--",
+                    "--path",
+                    "asdf"
                 ],
                 "filter": {
                     "name": "decode8086",
                     "kind": "bin"
                 }
             },
-            "args": [],
             "cwd": "${workspaceFolder}"
         }
     ]

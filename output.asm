@@ -1,3 +1,4 @@
 bits 16
 
-mov cx, bx
+mov si, bx
+mov dh, al
