@@ -157,6 +157,28 @@ impl Mode {
     }
 }
 
+
+fn get_effective_address(rm: u8, displacement: u16) -> String {
+    let result = match rm {
+        0b000 => "bx + si".to_owned(),
+        0b001 => "bx + di".to_owned(),
+        0b010 => "bp + si".to_owned(),
+        0b011 => "bp + di".to_owned(),
+        0b100 => "si".to_owned(),
+        0b101 => "di".to_owned(),
+        0b110 => "bp".to_owned(),
+        0b111 => "bx".to_owned(),
+        _ => panic!("unknown rm match"),
+    };
+
+    if displacement > 0 {
+        format!("[{result} + {displacement}]")
+    }
+    else {
+        format!("[{result}]")
+    }
+}
+
 fn decode_bytes(bytes: Vec<u8>) -> String {
     let mut i = 0;
 
@@ -178,7 +200,7 @@ fn decode_bytes(bytes: Vec<u8>) -> String {
                 let second = bytes[cursor];
 
                 // direction -> 0 REG is source, 1 REG is dest
-                let d = (first & Mask::ToRegisterMask as u8) >> 1;
+                let mut d = (first & Mask::ToRegisterMask as u8) >> 1;
                 let w = first & Mask::WordMask as u8;
 
                 // mode tells us whether one of the operands or both are registers
@@ -193,87 +215,45 @@ fn decode_bytes(bytes: Vec<u8>) -> String {
                 dbg!(rm);
                 dbg!(reg);
 
+                let reg_name = Register::from_encoding(reg, w);
+
                 match mode {
                     Mode::RegisterMode => {
-                        let reg_asm_a = Register::from_encoding(reg, w);
-                        let reg_asm_b = Register::from_encoding(rm, w);
-                        let (reg_src, reg_dest) = match d {
-                            0 => (reg_asm_b, reg_asm_a),
-                            1 => (reg_asm_a, reg_asm_b),
-                            _ => panic!("Unexpected value for d"),  // or handle this case differently
-                        };
-                        output += &format!("\n{} {}, {}", opcode, reg_dest, reg_src);
-                    }
-                    Mode::MemoryNoDisplacement => {
-                        let reg_dest_asm = Register::from_encoding(reg, w);
-                        let effective_address = match rm {
-                            0b000 => "[bx + si]",
-                            0b001 => "[bx + di]",
-                            0b010 => "[bp + si]",
-                            0b011 => "[bp + di]",
-                            0b100 => "[si]",
-                            0b101 => "[di]",
-                            0b110 => "direct",
-                            0b111 => "[bx]",
-                            _ => panic!("unknown rm match"),
-                        };
-                        let (op1, op2) = match d {
-                            1 => (reg_dest_asm.to_string(), effective_address.to_string()),
-                            0 => (effective_address.to_string(), reg_dest_asm.to_string()),
-                            _ => panic!("Unexpected value for d"),  // or handle this case differently
-                        };
-                        output += &format!("\n{} {}, {}", opcode, op1, op2);
-                    }
-                    Mode::Memory8BitDisplacement => {
-                        let reg_src_asm = Register::from_encoding(rm, w);
-                        cursor += 1;
-                        let displacement = bytes[cursor];
-                        let effective_address = match rm {
-                            0b000 => format!("[bx + si + {}]", displacement),
-                            0b001 => format!("[bx + di + {}]", displacement),
-                            0b010 => format!("[bp + si + {}]", displacement),
-                            0b011 => format!("[bp + di + {}]", displacement),
-                            0b100 => format!("[si + {}]", displacement),
-                            0b101 => format!("[di + {}]", displacement),
-                            0b110 => format!("[bp + {}]", displacement),
-                            0b111 => format!("[bx + {}]", displacement),
-                            _ => panic!("unknown rm match"),
-                        };
-                        let (op1, op2) = match d {
-                            1 => (reg_src_asm.to_string(), effective_address.to_string()),
-                            0 => (effective_address.to_string(), reg_src_asm.to_string()),
-                            _ => panic!("Unexpected value for d"),  // or handle this case differently
-                        };
-                        output += &format!("\n{} {}, {}", opcode, op1, op2);
-                    }
-                    Mode::Memory16BitDisplacement => {
-                        let reg_src_asm = Register::from_encoding(rm, w);
-                        cursor += 1;
-                        let displacement_l = bytes[cursor];
-                        cursor += 1;
-                        let displacement_h = bytes[cursor];
+                        let rm_name = Register::from_encoding(rm, w);
+                        if d == 0 {
+                            output += &format!("\n{} {}, {}", opcode, reg_name, rm_name);
+                        } else {
+                            output += &format!("\n{} {}, {}", opcode, rm_name, reg_name);
+                        }
+                    },
+                    _ => {
+                        let mut displacement_l = 0;
+                        let mut displacement_h = 0;
+
+                        if rm == 0b110 && mode == Mode::MemoryNoDisplacement {
+                            cursor += 2
+                        }
+
+                        if mode == Mode::Memory8BitDisplacement {
+                            cursor += 1;
+                            displacement_l = bytes[cursor];
+                        }
+                        if mode == Mode::Memory16BitDisplacement {
+                            cursor += 1;
+                            displacement_h = bytes[cursor];
+                        }
                         let displacement = u16::from_le_bytes([displacement_l, displacement_h]);
-                        let effective_address = match rm {
-                            0b000 => format!("[bx + si + {}]", displacement),
-                            0b001 => format!("[bx + di + {}]", displacement),
-                            0b010 => format!("[bp + si + {}]", displacement),
-                            0b011 => format!("[bp + di + {}]", displacement),
-                            0b100 => format!("[si + {}]", displacement),
-                            0b101 => format!("[di + {}]", displacement),
-                            0b110 => format!("[bp + {}]", displacement),
-                            0b111 => format!("[bx + {}]", displacement),
-                            _ => panic!("unknown rm match"),
-                        };
-                        let (op1, op2) = match d {
-                            1 => (reg_src_asm.to_string(), effective_address.to_string()),
-                            0 => (effective_address.to_string(), reg_src_asm.to_string()),
-                            _ => panic!("Unexpected value for d"),  // or handle this case differently
-                        };
-                        output += &format!("\n{} {}, {}", opcode, op1, op2);
+                        let address = get_effective_address(rm, displacement);
+
+                        if d == 1 {
+                            output += &format!("\n{} {}, {}", opcode, reg_name, address);
+                        } else {
+                            output += &format!("\n{} {}, {}", opcode, address, reg_name);
+                        }
                     }
-                }
-                println!("{output}")
+                };
             }
+
             OpCode::MOV(MovType::ImmToReg) => {
                 cursor += 1;
                 let data = bytes[cursor];
@@ -289,6 +269,7 @@ fn decode_bytes(bytes: Vec<u8>) -> String {
                     data_byte_h = bytes[cursor];
                 }
                 let combined_be = u16::from_le_bytes([data_byte_l, data_byte_h]);
+                dbg!(combined_be);
                 output += &format!("\n{} {}, {}", opcode, reg_dest_asm, combined_be);
             }
             _ => panic!("asdf"),
