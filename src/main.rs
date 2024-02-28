@@ -1,72 +1,8 @@
 use clap::Parser;
 use core::panic;
+use std::collections::HashMap;
 use std::fmt;
 use std::fs;
-use std::io::{Error, ErrorKind};
-
-enum Mask {
-    // byte 1
-    OpcodeMask = 0b1111_1100,
-    ToRegisterMask = 0b0000_0010,
-    WordMask = 0b0000_0001,
-    Nibble = 0b1111_0000,
-    // byte 2
-    RegisterMode = 0b1100_0000,
-    RegisterExt = 0b0011_1000,
-    RegisterOp = 0b0000_0111,
-}
-
-#[derive(Debug)]
-enum OpCode {
-    MOV(MovType),
-}
-
-#[derive(Debug)]
-enum MovType {
-    RegToReg,
-    ImmToRegMem,
-    ImmToReg,
-    Acc,
-    Segment,
-}
-
-impl OpCode {
-    fn is_mov(&self) -> bool {
-        matches!(self, OpCode::MOV(_))
-    }
-}
-
-impl fmt::Display for OpCode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.is_mov() {
-            write!(f, "mov")
-        } else {
-            write!(f, "unknown")
-        }
-    }
-}
-
-impl OpCode {
-    fn from_encoding(encoding: u8) -> Result<OpCode, std::io::Error> {
-        let nibble = (encoding & Mask::Nibble as u8) >> 4;
-        let opcode = (encoding & Mask::OpcodeMask as u8) >> 2;
-        if (nibble) == 0b001011 {
-            return Ok(OpCode::MOV(MovType::ImmToReg));
-        }
-
-        match opcode {
-            0b00100010 => Ok(OpCode::MOV(MovType::RegToReg)),
-            0b00110001 => Ok(OpCode::MOV(MovType::ImmToRegMem)),
-            0b00101000 => Ok(OpCode::MOV(MovType::Acc)),
-            0b00100011 => Ok(OpCode::MOV(MovType::Segment)),
-
-            unmatched => Err(Error::new(
-                ErrorKind::Other,
-                format!("Unimplemented handling of opcode {:b}", unmatched),
-            )),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 enum Register {
@@ -86,29 +22,6 @@ enum Register {
     BP,
     SI,
     DI,
-}
-
-impl fmt::Display for Register {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Register::AL => write!(f, "al"),
-            Register::CL => write!(f, "cl"),
-            Register::DL => write!(f, "dl"),
-            Register::BL => write!(f, "bl"),
-            Register::AH => write!(f, "ah"),
-            Register::CH => write!(f, "ch"),
-            Register::DH => write!(f, "dh"),
-            Register::BH => write!(f, "bh"),
-            Register::AX => write!(f, "ax"),
-            Register::CX => write!(f, "cx"),
-            Register::DX => write!(f, "dx"),
-            Register::BX => write!(f, "bx"),
-            Register::SP => write!(f, "sp"),
-            Register::BP => write!(f, "bp"),
-            Register::SI => write!(f, "si"),
-            Register::DI => write!(f, "di"),
-        }
-    }
 }
 
 impl Register {
@@ -135,6 +48,150 @@ impl Register {
     }
 }
 
+impl fmt::Display for Register {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Register::AL => write!(f, "al"),
+            Register::CL => write!(f, "cl"),
+            Register::DL => write!(f, "dl"),
+            Register::BL => write!(f, "bl"),
+            Register::AH => write!(f, "ah"),
+            Register::CH => write!(f, "ch"),
+            Register::DH => write!(f, "dh"),
+            Register::BH => write!(f, "bh"),
+            Register::AX => write!(f, "ax"),
+            Register::CX => write!(f, "cx"),
+            Register::DX => write!(f, "dx"),
+            Register::BX => write!(f, "bx"),
+            Register::SP => write!(f, "sp"),
+            Register::BP => write!(f, "bp"),
+            Register::SI => write!(f, "si"),
+            Register::DI => write!(f, "di"),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum FieldWidths {
+    Opcode(u8),
+    D(u8),
+    W(u8),
+    Mod(u8),
+    Reg(u8),
+    Rm(u8),
+    DispLo(u8),
+    DispHi(u8),
+    Data(u8),
+}
+
+#[derive(Debug, Copy, Clone)]
+enum FieldLabel {
+    Opcode,
+    D,
+    W,
+    Mod,
+    Reg,
+    Rm,
+    DispLo,
+    DispHi,
+    Data,
+}
+
+#[derive(Debug)]
+struct MovRegMem {
+    opcode: u8,
+    d: u8,
+    w: u8,
+    r#mod: Register,
+    reg: Register,
+    rm: u8,
+    disp_lo: Option<u8>,
+    displ_hi: Option<u8>,
+    data: Option<u8>,
+}
+
+#[derive(Debug)]
+struct MovImmToReg;
+
+#[derive(Debug)]
+enum InstructionType {
+    MovRegMem,
+    MovImmToReg,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Field {
+    label: FieldLabel,
+    width: u8,
+}
+
+trait Instruction {
+    fn mnemonic() -> String;
+    fn fields() -> Vec<Field>;
+    fn decode(bytes: &Vec<u8>) -> String;
+}
+
+impl Instruction for MovRegMem {
+    fn mnemonic() -> String {
+        "mov".to_owned()
+    }
+
+    fn fields() -> Vec<Field> {
+        return vec![
+            Field {
+                label: FieldLabel::Opcode,
+                width: 6,
+            },
+            Field {
+                label: FieldLabel::D,
+                width: 1,
+            },
+            Field {
+                label: FieldLabel::W,
+                width: 1,
+            },
+            //
+            Field {
+                label: FieldLabel::Mod,
+                width: 3,
+            },
+            Field {
+                label: FieldLabel::Reg,
+                width: 3,
+            },
+            Field {
+                label: FieldLabel::Rm,
+                width: 2,
+            },
+        ];
+    }
+
+    fn decode(bytes: &Vec<u8>) -> String {
+        "".to_owned()
+    }
+}
+
+// impl Instruction for MovImmToReg {
+//     fn mnemonic() -> String {
+//         "mov".to_owned()
+//     }
+//
+//     fn fields() -> Vec<u8> {
+//         return vec![
+//             4,
+//             1,
+//             3,
+//             8,
+//             8,
+//         ];
+//     }
+//
+//     fn decode(bytes: &Vec<u8>) -> String {
+//         "mov".to_owned()
+//     }
+//
+// }
+
 #[derive(Debug, PartialEq, Eq)]
 enum Mode {
     MemoryNoDisplacement,
@@ -157,135 +214,133 @@ impl Mode {
     }
 }
 
+// fn get_effective_address(rm: u8, displacement: u16) -> String {
+//     let result = match rm {
+//         0b000 => "bx + si".to_owned(),
+//         0b001 => "bx + di".to_owned(),
+//         0b010 => "bp + si".to_owned(),
+//         0b011 => "bp + di".to_owned(),
+//         0b100 => "si".to_owned(),
+//         0b101 => "di".to_owned(),
+//         0b110 => "bp".to_owned(),
+//         0b111 => "bx".to_owned(),
+//         _ => panic!("unknown rm match"),
+//     };
+//
+//     if displacement > 0 {
+//         format!("[{result} + {displacement}]")
+//     } else {
+//         format!("[{result}]")
+//     }
+// }
+fn find_opcode<'a>(
+    byte: u8,
+    instruction_table: &'a HashMap<u8, InstructionType>,
+) -> &'a InstructionType {
+    let opcodes = vec![
+        (byte & 0b1111_0000) >> 4,
+        (byte & 0b1111_1000) >> 3,
+        (byte & 0b1111_1100) >> 2,
+        (byte & 0b1111_1110) >> 1,
+        byte,
+    ];
 
-fn get_effective_address(rm: u8, displacement: u16) -> String {
-    let result = match rm {
-        0b000 => "bx + si".to_owned(),
-        0b001 => "bx + di".to_owned(),
-        0b010 => "bp + si".to_owned(),
-        0b011 => "bp + di".to_owned(),
-        0b100 => "si".to_owned(),
-        0b101 => "di".to_owned(),
-        0b110 => "bp".to_owned(),
-        0b111 => "bx".to_owned(),
-        _ => panic!("unknown rm match"),
-    };
+    for opcode in opcodes {
+        match instruction_table.get(&opcode) {
+            Some(instruction) => return instruction,
+            _ => (),
+        }
+    }
+    panic!("unknown instruction {:#b}", byte)
+}
 
-    if displacement > 0 {
-        format!("[{result} + {displacement}]")
+static BIT_MASKS: [u8; 9] = [
+    0b00000000, 0b10000000, 0b11000000, 0b11100000, 0b11110000, 0b11111000, 0b11111100, 0b11111110,
+    0b11111111,
+];
+
+fn extract_fields(byte_count: usize, cursor: usize, bytes: &[u8], fields: &Vec<Field>) -> Vec<u8> {
+    let mut local_cursor = 0;
+    let mut base = bytes[local_cursor];
+    let mut width_sum = 0;
+    let mut values = vec![];
+
+    for &field in fields {
+        let width = field.width as usize;
+        width_sum += width;
+
+        if width_sum > 8 {
+            local_cursor += 1;
+            if local_cursor >= byte_count.into() {
+                break;
+            }
+            width_sum = 0;
+            base = bytes[cursor + local_cursor];
+            println!("target {:#b}", base);
+        }
+
+        let value = (BIT_MASKS[width] & base) >> (8 - width);
+        values.push(value);
+        base = base << width;
     }
-    else {
-        format!("[{result}]")
-    }
+
+    values
 }
 
 fn decode_bytes(bytes: Vec<u8>) -> String {
-    let mut i = 0;
+    let mut cursor: usize = 0;
 
-    let mut output = "bits 16\n".to_string();
-    while i < bytes.len() {
-        let mut cursor = i;
-        let first = bytes[cursor];
+    let mut instruction_table: HashMap<u8, InstructionType> = HashMap::new();
 
-        let opcode = OpCode::from_encoding(first).unwrap_or_else(|err| {
-            println!("{output}");
-            eprintln!("{}, exiting", err);
-            std::process::exit(1);
-        });
-        dbg!(&opcode);
+    instruction_table.insert(0b100010, InstructionType::MovRegMem);
+    instruction_table.insert(0b1011, InstructionType::MovImmToReg);
 
-        match opcode {
-            OpCode::MOV(MovType::RegToReg) => {
-                cursor += 1;
-                let second = bytes[cursor];
+    while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        println!("target 1 {:#b}", byte);
+        println!("target 2 {:#b}", bytes[cursor +1]);
+        let instruction_type = find_opcode(byte, &instruction_table);
 
-                // direction -> 0 REG is source, 1 REG is dest
-                let mut d = (first & Mask::ToRegisterMask as u8) >> 1;
-                let w = first & Mask::WordMask as u8;
+        match instruction_type {
+            InstructionType::MovRegMem => {
+                let byte_count: usize = 2;
+                let fields = MovRegMem::fields();
+                let values = extract_fields(byte_count, cursor, &bytes, &fields);
 
-                // mode tells us whether one of the operands or both are registers
-                let mode = (second & Mask::RegisterMode as u8) >> 6;
-                let rm = (second & Mask::RegisterExt as u8) >> 3;
-                let reg = second & Mask::RegisterOp as u8;
-
-                let mode = Mode::from_encoding(mode, rm);
-
-                dbg!(w);
-                dbg!(&mode);
-                dbg!(rm);
-                dbg!(reg);
-
-                let reg_name = Register::from_encoding(reg, w);
-
-                match mode {
-                    Mode::RegisterMode => {
-                        let rm_name = Register::from_encoding(rm, w);
-                        if d == 0 {
-                            output += &format!("\n{} {}, {}", opcode, reg_name, rm_name);
-                        } else {
-                            output += &format!("\n{} {}, {}", opcode, rm_name, reg_name);
-                        }
-                    },
-                    _ => {
-                        let mut displacement_l = 0;
-                        let mut displacement_h = 0;
-
-                        if rm == 0b110 && mode == Mode::MemoryNoDisplacement {
-                            cursor += 2
-                        }
-
-                        if mode == Mode::Memory8BitDisplacement {
-                            cursor += 1;
-                            displacement_l = bytes[cursor];
-                        }
-                        if mode == Mode::Memory16BitDisplacement {
-                            cursor += 1;
-                            displacement_h = bytes[cursor];
-                        }
-                        let displacement = u16::from_le_bytes([displacement_l, displacement_h]);
-                        let address = get_effective_address(rm, displacement);
-
-                        if d == 1 {
-                            output += &format!("\n{} {}, {}", opcode, reg_name, address);
-                        } else {
-                            output += &format!("\n{} {}, {}", opcode, address, reg_name);
-                        }
-                    }
-                };
-            }
-
-            OpCode::MOV(MovType::ImmToReg) => {
-                cursor += 1;
-                let data = bytes[cursor];
-                let w = (first & 0b0000_1000) >> 3;
-                let reg = first & 0b0000_0111;
-                dbg!(w);
-
-                let reg_dest_asm = Register::from_encoding(reg, w);
-                let data_byte_l = data;
-                let mut data_byte_h = 0;
-                if w == 1 {
-                    cursor += 1;
-                    data_byte_h = bytes[cursor];
+                for (i, value) in values.iter().enumerate() {
+                    println!("{:?} {:08b}", fields[i].label, value);
                 }
-                let combined_be = u16::from_le_bytes([data_byte_l, data_byte_h]);
-                dbg!(combined_be);
-                output += &format!("\n{} {}, {}", opcode, reg_dest_asm, combined_be);
+
+                let instr = MovRegMem {
+                    opcode: values[0],
+                    d: values[1],
+                    w: values[2],
+                    r#mod: Register::from_encoding(values[3], values[2]),
+                    reg: Register::from_encoding(values[4], values[2]),
+                    rm: values[5],
+                    disp_lo: None,
+                    displ_hi: None,
+                    data: None,
+                };
+                dbg!(instr);
+
+                cursor += byte_count - 1
             }
-            _ => panic!("asdf"),
+            InstructionType::MovImmToReg => {
+                todo!()
+            }
         }
 
+        // println!("{:#b}", bytes[cursor]);
         cursor += 1;
-        i = cursor;
     }
 
-    output
+    todo!()
 }
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Name of the person to greet
     #[arg(short, long)]
     path: String,
 }
