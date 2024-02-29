@@ -1,5 +1,4 @@
 use clap::Parser;
-use core::panic;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
@@ -71,19 +70,6 @@ impl fmt::Display for Register {
     }
 }
 
-#[derive(Debug)]
-enum FieldWidths {
-    Opcode(u8),
-    D(u8),
-    W(u8),
-    Mod(u8),
-    Reg(u8),
-    Rm(u8),
-    DispLo(u8),
-    DispHi(u8),
-    Data(u8),
-}
-
 #[derive(Debug, Copy, Clone)]
 enum FieldLabel {
     Opcode,
@@ -92,9 +78,9 @@ enum FieldLabel {
     Mod,
     Reg,
     Rm,
-    DispLo,
-    DispHi,
-    Data,
+    // DispLo,
+    // DispHi,
+    // Data,
 }
 
 #[derive(Debug)]
@@ -102,12 +88,45 @@ struct MovRegMem {
     opcode: u8,
     d: u8,
     w: u8,
-    r#mod: Register,
-    reg: Register,
+    mode: u8,
+    reg: u8,
     rm: u8,
-    disp_lo: Option<u8>,
-    displ_hi: Option<u8>,
-    data: Option<u8>,
+    // disp_lo: Option<u8>,
+    // displ_hi: Option<u8>,
+    // data: Option<u8>,
+}
+
+impl fmt::Display for MovRegMem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match Mode::from_encoding(self.mode, self.rm) {
+            Mode::MemoryNoDisplacement => {
+                todo!()
+            }
+            Mode::Memory8BitDisplacement => {
+                todo!()
+            }
+            Mode::Memory16BitDisplacement => {
+                todo!()
+            }
+            Mode::RegisterMode => {
+                match self.d {
+                    1 => write!(
+                        f,
+                        "mov {}, {}",
+                        Register::from_encoding(self.reg, self.w),
+                        Register::from_encoding(self.rm, self.w)
+                    ), // reg is dest
+                    0 => write!(
+                        f,
+                        "mov {}, {}",
+                        Register::from_encoding(self.rm, self.w),
+                        Register::from_encoding(self.reg, self.w)
+                    ), // reg is src
+                    _ => write!(f, "error decoding d"),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -119,7 +138,7 @@ enum InstructionType {
     MovImmToReg,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 struct Field {
     label: FieldLabel,
     width: u8,
@@ -153,7 +172,7 @@ impl Instruction for MovRegMem {
             //
             Field {
                 label: FieldLabel::Mod,
-                width: 3,
+                width: 2,
             },
             Field {
                 label: FieldLabel::Reg,
@@ -161,12 +180,12 @@ impl Instruction for MovRegMem {
             },
             Field {
                 label: FieldLabel::Rm,
-                width: 2,
+                width: 3,
             },
         ];
     }
 
-    fn decode(bytes: &Vec<u8>) -> String {
+    fn decode(_bytes: &Vec<u8>) -> String {
         "".to_owned()
     }
 }
@@ -233,10 +252,7 @@ impl Mode {
 //         format!("[{result}]")
 //     }
 // }
-fn find_opcode<'a>(
-    byte: u8,
-    instruction_table: &'a HashMap<u8, InstructionType>,
-) -> &'a InstructionType {
+fn find_opcode(byte: u8, instruction_table: &HashMap<u8, InstructionType>) -> &InstructionType {
     let opcodes = vec![
         (byte & 0b1111_0000) >> 4,
         (byte & 0b1111_1000) >> 3,
@@ -259,32 +275,61 @@ static BIT_MASKS: [u8; 9] = [
     0b11111111,
 ];
 
-fn extract_fields(byte_count: usize, cursor: usize, bytes: &[u8], fields: &Vec<Field>) -> Vec<u8> {
+fn extract_fields(byte_count: u8, bytes: &[u8], widths: Vec<u8>) -> Vec<u8> {
+    dbg!(widths.iter().sum::<u8>());
+    dbg!(byte_count * 8);
+    if widths.iter().sum::<u8>() != byte_count * 8 {
+        panic!("widths don't align with bytes");
+    }
+
     let mut local_cursor = 0;
     let mut base = bytes[local_cursor];
     let mut width_sum = 0;
     let mut values = vec![];
 
-    for &field in fields {
-        let width = field.width as usize;
+    for width in widths {
         width_sum += width;
 
         if width_sum > 8 {
+            width_sum = width;
+
             local_cursor += 1;
             if local_cursor >= byte_count.into() {
                 break;
             }
-            width_sum = 0;
-            base = bytes[cursor + local_cursor];
-            println!("target {:#b}", base);
+            base = bytes[local_cursor];
         }
 
-        let value = (BIT_MASKS[width] & base) >> (8 - width);
+        let value = (BIT_MASKS[width as usize] & base) >> (8 - width);
         values.push(value);
         base = base << width;
     }
 
     values
+}
+
+#[test]
+fn test_extract_fields_single_byte() {
+    let bytes = vec![0b10101010];
+    let widths = vec![4, 4];
+    let result = extract_fields(1, &bytes, widths);
+    assert_eq!(result, vec![0b1010, 0b1010]);
+}
+
+#[test]
+fn test_extract_fields_multiple_bytes() {
+    let bytes = vec![0b10101111, 0b11001100];
+    let widths = vec![4, 4, 4, 4];
+    let result = extract_fields(2, &bytes, widths);
+    assert_eq!(result, vec![0b1010, 0b1111, 0b1100, 0b1100]);
+}
+
+#[test]
+fn test_extract_fields_mixed_widths() {
+    let bytes = vec![0b10101010, 0b11001100, 0b11110011];
+    let widths = vec![6, 2, 2, 4, 2];
+    let result = extract_fields(3, &bytes, widths);
+    assert_eq!(result, vec![0b101010, 0b10, 0b11, 0b0011, 0b00]);
 }
 
 fn decode_bytes(bytes: Vec<u8>) -> String {
@@ -295,36 +340,47 @@ fn decode_bytes(bytes: Vec<u8>) -> String {
     instruction_table.insert(0b100010, InstructionType::MovRegMem);
     instruction_table.insert(0b1011, InstructionType::MovImmToReg);
 
+    let mut result = vec!["bits 16".to_string(), "".to_string()];
+
     while cursor < bytes.len() {
         let byte = bytes[cursor];
-        println!("target 1 {:#b}", byte);
-        println!("target 2 {:#b}", bytes[cursor +1]);
         let instruction_type = find_opcode(byte, &instruction_table);
 
         match instruction_type {
             InstructionType::MovRegMem => {
-                let byte_count: usize = 2;
+                let byte_count = 2;
                 let fields = MovRegMem::fields();
-                let values = extract_fields(byte_count, cursor, &bytes, &fields);
+                let widths: Vec<_> = fields.iter().map(|field| field.width).collect();
+                let values = extract_fields(byte_count, &bytes[cursor..], widths);
 
-                for (i, value) in values.iter().enumerate() {
-                    println!("{:?} {:08b}", fields[i].label, value);
-                }
+                // println!("--------");
+                // for (i, value) in values.iter().enumerate() {
+                //     println!("{:?} {:08b}", fields[i].label, value);
+                // }
+                // println!("--------");
+
+                let opcode = values[0];
+                let d = values[1];
+                let w = values[2];
+
+                let mode = values[3];
+                let reg = values[4];
+                let rm = values[5];
 
                 let instr = MovRegMem {
-                    opcode: values[0],
-                    d: values[1],
-                    w: values[2],
-                    r#mod: Register::from_encoding(values[3], values[2]),
-                    reg: Register::from_encoding(values[4], values[2]),
-                    rm: values[5],
-                    disp_lo: None,
-                    displ_hi: None,
-                    data: None,
+                    opcode,
+                    d,
+                    w,
+                    mode,
+                    reg,
+                    rm,
+                    // disp_lo: None,
+                    // displ_hi: None,
+                    // data: None,
                 };
-                dbg!(instr);
+                result.push(format!("{}", instr));
 
-                cursor += byte_count - 1
+                cursor += byte_count as usize - 1
             }
             InstructionType::MovImmToReg => {
                 todo!()
@@ -335,7 +391,7 @@ fn decode_bytes(bytes: Vec<u8>) -> String {
         cursor += 1;
     }
 
-    todo!()
+    result.join("\n")
 }
 
 #[derive(Parser, Debug)]
@@ -399,7 +455,7 @@ mov bp, ax";
 
 #[test]
 fn more_movs() {
-    let actual_output = decode_file(&"test/listing_0038_more_movs".to_string());
+    let actual_output = decode_file(&"test/listing_0039_more_movs".to_string());
 
     let expected_output = "bits 16
 
