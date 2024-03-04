@@ -29,24 +29,72 @@ struct MovRegMem {
     mode: u8,
     reg: u8,
     rm: u8,
-    // disp_lo: Option<u8>,
-    // displ_hi: Option<u8>,
-    // data: Option<u8>,
+    disp_lo: Option<u8>,
+    disp_hi: Option<u8>,
 }
 
 impl fmt::Display for MovRegMem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match Mode::from_encoding(self.mode, self.rm) {
             Mode::MemoryNoDisplacement => {
-                todo!("no displacement")
+                let expr = get_effective_address(self.rm, 0);
+                match self.d {
+                    1 => write!(
+                        f,
+                        "mov {}, {}",
+                        Register::from_encoding(self.reg, self.w),
+                        expr,
+                    ), // reg is dest
+                    0 => write!(
+                        f,
+                        "mov {}, {}",
+                        expr,
+                        Register::from_encoding(self.reg, self.w)
+                    ), // reg is src
+                    _ => write!(f, "error decoding d"),
+                }
             }
             Mode::Memory8BitDisplacement => {
-                todo!("8 displacement")
+                let displacement = self.disp_lo;
+                let expr = get_effective_address(self.rm, displacement.unwrap().into());
+                match self.d {
+                    1 => write!(
+                        f,
+                        "mov {}, {}",
+                        Register::from_encoding(self.reg, self.w),
+                        expr,
+                    ), // reg is dest
+                    0 => write!(
+                        f,
+                        "mov {}, {}",
+                        expr,
+                        Register::from_encoding(self.reg, self.w)
+                    ), // reg is src
+                    _ => write!(f, "error decoding d"),
+                }
             }
             Mode::Memory16BitDisplacement => {
-                todo!("16 bit displacement")
+                let disp_hi = self.disp_hi.unwrap_or(0);
+                let disp_lo = self.disp_lo.unwrap_or(0);
+                let displacement: u16 = (disp_hi as u16) << 8 | (disp_lo as u16);
+                let expr = get_effective_address(self.rm, displacement);
+                match self.d {
+                    1 => write!(
+                        f,
+                        "mov {}, {}",
+                        Register::from_encoding(self.reg, self.w),
+                        expr,
+                    ), // reg is dest
+                    0 => write!(
+                        f,
+                        "mov {}, {}",
+                        expr,
+                        Register::from_encoding(self.reg, self.w)
+                    ), // reg is src
+                    _ => write!(f, "error decoding d"),
+                }
             }
-            Mode::RegisterMode => {
+            Mode::Register => {
                 match self.d {
                     1 => write!(
                         f,
@@ -69,9 +117,12 @@ impl fmt::Display for MovRegMem {
 
 impl fmt::Display for MovImmToReg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "mov {}, {}",
-        Register::from_encoding(self.reg, self.w),
-        self.data)
+        write!(
+            f,
+            "mov {}, {}",
+            Register::from_encoding(self.reg, self.w),
+            self.data
+        )
     }
 }
 
@@ -101,7 +152,6 @@ trait Instruction {
 }
 
 impl Instruction for MovRegMem {
-
     fn fields() -> Vec<Field> {
         vec![
             Field {
@@ -133,7 +183,7 @@ impl Instruction for MovRegMem {
     }
 
     fn decode(bytes: &[u8]) -> (MovRegMem, usize) {
-        let byte_count = 2;
+        let mut byte_count = 2;
         let fields = MovRegMem::fields();
         let widths: Vec<_> = fields.iter().map(|field| field.width).collect();
         let values = bitfields::extract_fields(byte_count, bytes, widths);
@@ -146,26 +196,82 @@ impl Instruction for MovRegMem {
         let reg = values[4];
         let rm = values[5];
 
-        (
-            MovRegMem {
-                opcode,
-                d,
-                w,
-                mode,
-                reg,
-                rm,
-                // disp_lo: None,
-                // displ_hi: None,
-                // data: None,
-            },
-            byte_count.into(),
-        )
+        let m = Mode::from_encoding(mode, rm);
+        match m {
+            Mode::MemoryNoDisplacement => {
+                byte_count += 2;
+                (
+                MovRegMem {
+                    opcode,
+                    d,
+                    w,
+                    mode,
+                    reg,
+                    rm,
+                    disp_lo: Some(0),
+                    disp_hi: Some(0)
+                },
+                byte_count.into(),
+                    )
+            }
+            Mode::Memory8BitDisplacement => {
+
+                let displ_lo = bytes[2];
+                byte_count += 1;
+                (
+                    MovRegMem {
+                        opcode,
+                        d,
+                        w,
+                        mode,
+                        reg,
+                        rm,
+                        disp_lo: Some(displ_lo),
+                        disp_hi: None,
+                    },
+                    byte_count.into(),
+                )
+            }
+            Mode::Memory16BitDisplacement => {
+
+                let displ_lo = bytes[2];
+                let displ_hi = bytes[3];
+                byte_count += 2;
+                (
+                    MovRegMem {
+                        opcode,
+                        d,
+                        w,
+                        mode,
+                        reg,
+                        rm,
+                        disp_lo: Some(displ_lo),
+                        disp_hi: Some(displ_hi),
+                    },
+                    byte_count.into(),
+                )
+            }
+
+            Mode::Register => {
+            (
+                MovRegMem {
+                    opcode,
+                    d,
+                    w,
+                    mode,
+                    reg,
+                    rm,
+                    disp_lo: None,
+                    disp_hi: None,
+                },
+                byte_count.into(),
+            )
+            }
+        }
     }
 }
 
-
 impl Instruction for MovImmToReg {
-
     fn fields() -> Vec<Field> {
         vec![
             Field {
@@ -214,13 +320,12 @@ impl Instruction for MovImmToReg {
     }
 }
 
-
 #[derive(Debug, PartialEq, Eq)]
 enum Mode {
     MemoryNoDisplacement,
     Memory8BitDisplacement,
     Memory16BitDisplacement,
-    RegisterMode,
+    Register,
 }
 
 impl Mode {
@@ -231,31 +336,31 @@ impl Mode {
             (0b00, _) => Mode::MemoryNoDisplacement,
             (0b01, _) => Mode::Memory8BitDisplacement,
             (0b10, _) => Mode::Memory16BitDisplacement,
-            (0b11, _) => Mode::RegisterMode,
+            (0b11, _) => Mode::Register,
             _ => panic!("unknown MOD encoding"),
         }
     }
 }
 
-// fn get_effective_address(rm: u8, displacement: u16) -> String {
-//     let result = match rm {
-//         0b000 => "bx + si".to_owned(),
-//         0b001 => "bx + di".to_owned(),
-//         0b010 => "bp + si".to_owned(),
-//         0b011 => "bp + di".to_owned(),
-//         0b100 => "si".to_owned(),
-//         0b101 => "di".to_owned(),
-//         0b110 => "bp".to_owned(),
-//         0b111 => "bx".to_owned(),
-//         _ => panic!("unknown rm match"),
-//     };
-//
-//     if displacement > 0 {
-//         format!("[{result} + {displacement}]")
-//     } else {
-//         format!("[{result}]")
-//     }
-// }
+fn get_effective_address(rm: u8, displacement: u16) -> String {
+    let result = match rm {
+        0b000 => "bx + si".to_owned(),
+        0b001 => "bx + di".to_owned(),
+        0b010 => "bp + si".to_owned(),
+        0b011 => "bp + di".to_owned(),
+        0b100 => "si".to_owned(),
+        0b101 => "di".to_owned(),
+        0b110 => "bp".to_owned(),
+        0b111 => "bx".to_owned(),
+        _ => panic!("unknown rm match"),
+    };
+
+    if displacement > 0 {
+        format!("[{result} + {displacement}]")
+    } else {
+        format!("[{result}]")
+    }
+}
 
 fn find_opcode(byte: u8, instruction_table: &HashMap<u8, InstructionType>) -> &InstructionType {
     let opcodes = vec![
@@ -268,7 +373,7 @@ fn find_opcode(byte: u8, instruction_table: &HashMap<u8, InstructionType>) -> &I
 
     for opcode in opcodes {
         if let Some(instruction) = instruction_table.get(&opcode) {
-            return instruction
+            return instruction;
         }
     }
     panic!("unknown instruction {:#b}", byte)
