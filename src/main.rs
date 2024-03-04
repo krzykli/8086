@@ -1,74 +1,12 @@
+mod bitfields;
+mod register;
+
 use clap::Parser;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 
-#[derive(Debug, Clone, Copy)]
-enum Register {
-    AL,
-    CL,
-    DL,
-    BL,
-    AH,
-    CH,
-    DH,
-    BH,
-    AX,
-    CX,
-    DX,
-    BX,
-    SP,
-    BP,
-    SI,
-    DI,
-}
-
-impl Register {
-    fn from_encoding(encoding: u8, w: u8) -> Register {
-        match (encoding, w) {
-            (0b000, 0) => Register::AL,
-            (0b001, 0) => Register::CL,
-            (0b010, 0) => Register::DL,
-            (0b011, 0) => Register::BL,
-            (0b100, 0) => Register::AH,
-            (0b101, 0) => Register::CH,
-            (0b110, 0) => Register::DH,
-            (0b111, 0) => Register::BH,
-            (0b000, 1) => Register::AX,
-            (0b001, 1) => Register::CX,
-            (0b010, 1) => Register::DX,
-            (0b011, 1) => Register::BX,
-            (0b100, 1) => Register::SP,
-            (0b101, 1) => Register::BP,
-            (0b110, 1) => Register::SI,
-            (0b111, 1) => Register::DI,
-            _ => panic!("unknown REG encoding"),
-        }
-    }
-}
-
-impl fmt::Display for Register {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Register::AL => write!(f, "al"),
-            Register::CL => write!(f, "cl"),
-            Register::DL => write!(f, "dl"),
-            Register::BL => write!(f, "bl"),
-            Register::AH => write!(f, "ah"),
-            Register::CH => write!(f, "ch"),
-            Register::DH => write!(f, "dh"),
-            Register::BH => write!(f, "bh"),
-            Register::AX => write!(f, "ax"),
-            Register::CX => write!(f, "cx"),
-            Register::DX => write!(f, "dx"),
-            Register::BX => write!(f, "bx"),
-            Register::SP => write!(f, "sp"),
-            Register::BP => write!(f, "bp"),
-            Register::SI => write!(f, "si"),
-            Register::DI => write!(f, "di"),
-        }
-    }
-}
+use register::Register;
 
 #[derive(Debug, Copy, Clone)]
 enum FieldLabel {
@@ -100,13 +38,13 @@ impl fmt::Display for MovRegMem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match Mode::from_encoding(self.mode, self.rm) {
             Mode::MemoryNoDisplacement => {
-                todo!()
+                todo!("no displacement")
             }
             Mode::Memory8BitDisplacement => {
-                todo!()
+                todo!("8 displacement")
             }
             Mode::Memory16BitDisplacement => {
-                todo!()
+                todo!("16 bit displacement")
             }
             Mode::RegisterMode => {
                 match self.d {
@@ -129,8 +67,21 @@ impl fmt::Display for MovRegMem {
     }
 }
 
+impl fmt::Display for MovImmToReg {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "mov {}, {}",
+        Register::from_encoding(self.reg, self.w),
+        self.data)
+    }
+}
+
 #[derive(Debug)]
-struct MovImmToReg;
+struct MovImmToReg {
+    opcode: u8,
+    w: u8,
+    reg: u8,
+    data: u16,
+}
 
 #[derive(Debug)]
 enum InstructionType {
@@ -145,18 +96,14 @@ struct Field {
 }
 
 trait Instruction {
-    fn mnemonic() -> String;
     fn fields() -> Vec<Field>;
-    fn decode(bytes: &Vec<u8>) -> String;
+    fn decode(bytes: &[u8]) -> (impl Instruction, usize);
 }
 
 impl Instruction for MovRegMem {
-    fn mnemonic() -> String {
-        "mov".to_owned()
-    }
 
     fn fields() -> Vec<Field> {
-        return vec![
+        vec![
             Field {
                 label: FieldLabel::Opcode,
                 width: 6,
@@ -182,34 +129,91 @@ impl Instruction for MovRegMem {
                 label: FieldLabel::Rm,
                 width: 3,
             },
-        ];
+        ]
     }
 
-    fn decode(_bytes: &Vec<u8>) -> String {
-        "".to_owned()
+    fn decode(bytes: &[u8]) -> (MovRegMem, usize) {
+        let byte_count = 2;
+        let fields = MovRegMem::fields();
+        let widths: Vec<_> = fields.iter().map(|field| field.width).collect();
+        let values = bitfields::extract_fields(byte_count, bytes, widths);
+
+        let opcode = values[0];
+        let d = values[1];
+        let w = values[2];
+
+        let mode = values[3];
+        let reg = values[4];
+        let rm = values[5];
+
+        (
+            MovRegMem {
+                opcode,
+                d,
+                w,
+                mode,
+                reg,
+                rm,
+                // disp_lo: None,
+                // displ_hi: None,
+                // data: None,
+            },
+            byte_count.into(),
+        )
     }
 }
 
-// impl Instruction for MovImmToReg {
-//     fn mnemonic() -> String {
-//         "mov".to_owned()
-//     }
-//
-//     fn fields() -> Vec<u8> {
-//         return vec![
-//             4,
-//             1,
-//             3,
-//             8,
-//             8,
-//         ];
-//     }
-//
-//     fn decode(bytes: &Vec<u8>) -> String {
-//         "mov".to_owned()
-//     }
-//
-// }
+
+impl Instruction for MovImmToReg {
+
+    fn fields() -> Vec<Field> {
+        vec![
+            Field {
+                label: FieldLabel::Opcode,
+                width: 4,
+            },
+            Field {
+                label: FieldLabel::W,
+                width: 1,
+            },
+            Field {
+                label: FieldLabel::Reg,
+                width: 3,
+            },
+        ]
+    }
+
+    fn decode(bytes: &[u8]) -> (MovImmToReg, usize) {
+        let mut byte_count = 1;
+        let fields = MovImmToReg::fields();
+        let widths: Vec<_> = fields.iter().map(|field| field.width).collect();
+        let values = bitfields::extract_fields(byte_count, bytes, widths);
+
+        let opcode = values[0];
+        let w = values[1];
+        let reg = values[2];
+        //
+        let mut data = bytes[1] as u16;
+        byte_count += 1;
+
+        if w == 1 {
+            byte_count += 1;
+            let data16 = bytes[2];
+            data |= (data16 as u16) << 8
+        }
+
+        (
+            MovImmToReg {
+                opcode,
+                w,
+                reg,
+                data,
+            },
+            byte_count.into(),
+        )
+    }
+}
+
 
 #[derive(Debug, PartialEq, Eq)]
 enum Mode {
@@ -252,6 +256,7 @@ impl Mode {
 //         format!("[{result}]")
 //     }
 // }
+
 fn find_opcode(byte: u8, instruction_table: &HashMap<u8, InstructionType>) -> &InstructionType {
     let opcodes = vec![
         (byte & 0b1111_0000) >> 4,
@@ -262,74 +267,11 @@ fn find_opcode(byte: u8, instruction_table: &HashMap<u8, InstructionType>) -> &I
     ];
 
     for opcode in opcodes {
-        match instruction_table.get(&opcode) {
-            Some(instruction) => return instruction,
-            _ => (),
+        if let Some(instruction) = instruction_table.get(&opcode) {
+            return instruction
         }
     }
     panic!("unknown instruction {:#b}", byte)
-}
-
-static BIT_MASKS: [u8; 9] = [
-    0b00000000, 0b10000000, 0b11000000, 0b11100000, 0b11110000, 0b11111000, 0b11111100, 0b11111110,
-    0b11111111,
-];
-
-fn extract_fields(byte_count: u8, bytes: &[u8], widths: Vec<u8>) -> Vec<u8> {
-    dbg!(widths.iter().sum::<u8>());
-    dbg!(byte_count * 8);
-    if widths.iter().sum::<u8>() != byte_count * 8 {
-        panic!("widths don't align with bytes");
-    }
-
-    let mut local_cursor = 0;
-    let mut base = bytes[local_cursor];
-    let mut width_sum = 0;
-    let mut values = vec![];
-
-    for width in widths {
-        width_sum += width;
-
-        if width_sum > 8 {
-            width_sum = width;
-
-            local_cursor += 1;
-            if local_cursor >= byte_count.into() {
-                break;
-            }
-            base = bytes[local_cursor];
-        }
-
-        let value = (BIT_MASKS[width as usize] & base) >> (8 - width);
-        values.push(value);
-        base = base << width;
-    }
-
-    values
-}
-
-#[test]
-fn test_extract_fields_single_byte() {
-    let bytes = vec![0b10101010];
-    let widths = vec![4, 4];
-    let result = extract_fields(1, &bytes, widths);
-    assert_eq!(result, vec![0b1010, 0b1010]);
-}
-
-#[test]
-fn test_extract_fields_multiple_bytes() {
-    let bytes = vec![0b10101111, 0b11001100];
-    let widths = vec![4, 4, 4, 4];
-    let result = extract_fields(2, &bytes, widths);
-    assert_eq!(result, vec![0b1010, 0b1111, 0b1100, 0b1100]);
-}
-
-#[test]
-fn test_extract_fields_mixed_widths() {
-    let bytes = vec![0b10101010, 0b11001100, 0b11110011];
-    let widths = vec![6, 2, 2, 4, 2];
-    let result = extract_fields(3, &bytes, widths);
-    assert_eq!(result, vec![0b101010, 0b10, 0b11, 0b0011, 0b00]);
 }
 
 fn decode_bytes(bytes: Vec<u8>) -> String {
@@ -344,51 +286,25 @@ fn decode_bytes(bytes: Vec<u8>) -> String {
 
     while cursor < bytes.len() {
         let byte = bytes[cursor];
+        let mut bytes_consumed = 1;
         let instruction_type = find_opcode(byte, &instruction_table);
 
         match instruction_type {
             InstructionType::MovRegMem => {
-                let byte_count = 2;
-                let fields = MovRegMem::fields();
-                let widths: Vec<_> = fields.iter().map(|field| field.width).collect();
-                let values = extract_fields(byte_count, &bytes[cursor..], widths);
-
-                // println!("--------");
-                // for (i, value) in values.iter().enumerate() {
-                //     println!("{:?} {:08b}", fields[i].label, value);
-                // }
-                // println!("--------");
-
-                let opcode = values[0];
-                let d = values[1];
-                let w = values[2];
-
-                let mode = values[3];
-                let reg = values[4];
-                let rm = values[5];
-
-                let instr = MovRegMem {
-                    opcode,
-                    d,
-                    w,
-                    mode,
-                    reg,
-                    rm,
-                    // disp_lo: None,
-                    // displ_hi: None,
-                    // data: None,
-                };
+                let (instr, local_bytes_consumed) = MovRegMem::decode(&bytes[cursor..]);
                 result.push(format!("{}", instr));
-
-                cursor += byte_count as usize - 1
+                dbg!(&result);
+                bytes_consumed = local_bytes_consumed;
             }
             InstructionType::MovImmToReg => {
-                todo!()
+                let (instr, local_bytes_consumed) = MovImmToReg::decode(&bytes[cursor..]);
+                result.push(format!("{}", instr));
+                dbg!(&result);
+                bytes_consumed = local_bytes_consumed;
             }
         }
 
-        // println!("{:#b}", bytes[cursor]);
-        cursor += 1;
+        cursor += bytes_consumed;
     }
 
     result.join("\n")
