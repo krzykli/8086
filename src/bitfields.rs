@@ -57,8 +57,8 @@ fn test_extract_fields_multiple_bytes() {
 
 #[test]
 fn test_extract_fields_mixed_widths() {
-    let bytes = vec![0b10101010, 0b11001100, 0b11110011];
+    let bytes = vec![0b10101010, 0b11001100];
     let widths = vec![6, 2, 2, 4, 2];
-    let result = extract_fields(3, &bytes, widths);
+    let result = extract_fields(2, &bytes, widths);
     assert_eq!(result, vec![0b101010, 0b10, 0b11, 0b0011, 0b00]);
 }

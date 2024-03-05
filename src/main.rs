@@ -23,7 +23,7 @@ enum FieldLabel {
 
 #[derive(Debug)]
 struct MovRegMem {
-    opcode: u8,
+    _opcode: u8,
     d: u8,
     w: u8,
     mode: u8,
@@ -198,29 +198,25 @@ impl Instruction for MovRegMem {
 
         let m = Mode::from_encoding(mode, rm);
         match m {
-            Mode::MemoryNoDisplacement => {
-                byte_count += 2;
-                (
+            Mode::Register | Mode::MemoryNoDisplacement => (
                 MovRegMem {
-                    opcode,
+                    _opcode: opcode,
                     d,
                     w,
                     mode,
                     reg,
                     rm,
-                    disp_lo: Some(0),
-                    disp_hi: Some(0)
+                    disp_lo: None,
+                    disp_hi: None,
                 },
                 byte_count.into(),
-                    )
-            }
+            ),
             Mode::Memory8BitDisplacement => {
-
                 let displ_lo = bytes[2];
                 byte_count += 1;
                 (
                     MovRegMem {
-                        opcode,
+                        _opcode: opcode,
                         d,
                         w,
                         mode,
@@ -233,13 +229,13 @@ impl Instruction for MovRegMem {
                 )
             }
             Mode::Memory16BitDisplacement => {
-
                 let displ_lo = bytes[2];
                 let displ_hi = bytes[3];
+
                 byte_count += 2;
                 (
                     MovRegMem {
-                        opcode,
+                        _opcode: opcode,
                         d,
                         w,
                         mode,
@@ -250,22 +246,6 @@ impl Instruction for MovRegMem {
                     },
                     byte_count.into(),
                 )
-            }
-
-            Mode::Register => {
-            (
-                MovRegMem {
-                    opcode,
-                    d,
-                    w,
-                    mode,
-                    reg,
-                    rm,
-                    disp_lo: None,
-                    disp_hi: None,
-                },
-                byte_count.into(),
-            )
             }
         }
     }
@@ -391,25 +371,23 @@ fn decode_bytes(bytes: Vec<u8>) -> String {
 
     while cursor < bytes.len() {
         let byte = bytes[cursor];
-        let mut bytes_consumed = 1;
         let instruction_type = find_opcode(byte, &instruction_table);
 
         match instruction_type {
             InstructionType::MovRegMem => {
-                let (instr, local_bytes_consumed) = MovRegMem::decode(&bytes[cursor..]);
+                let (instr, bytes_consumed) = MovRegMem::decode(&bytes[cursor..]);
+
                 result.push(format!("{}", instr));
                 dbg!(&result);
-                bytes_consumed = local_bytes_consumed;
+                cursor += bytes_consumed;
             }
             InstructionType::MovImmToReg => {
-                let (instr, local_bytes_consumed) = MovImmToReg::decode(&bytes[cursor..]);
+                let (instr, bytes_consumed) = MovImmToReg::decode(&bytes[cursor..]);
                 result.push(format!("{}", instr));
                 dbg!(&result);
-                bytes_consumed = local_bytes_consumed;
+                cursor += bytes_consumed;
             }
-        }
-
-        cursor += bytes_consumed;
+        };
     }
 
     result.join("\n")
@@ -485,7 +463,7 @@ mov dh, al
 mov cl, 12
 mov ch, 244
 mov cx, 12
-mov cx, 244
+mov cx, 65524
 mov dx, 3948
 mov dx, 61588
 mov al, [bx + si]
