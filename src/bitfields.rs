@@ -19,6 +19,13 @@ pub fn extract_fields(byte_count: u8, bytes: &[u8], widths: Vec<u8>) -> Vec<u8> 
     let mut values = vec![];
 
     for width in widths {
+        if width == 8 {
+            let value = bytes[local_cursor];
+            values.push(value);
+            local_cursor += 1;
+            continue
+        }
+
         width_sum += width;
 
         if width_sum > 8 {
@@ -33,7 +40,7 @@ pub fn extract_fields(byte_count: u8, bytes: &[u8], widths: Vec<u8>) -> Vec<u8> 
 
         let value = (BIT_MASKS[width as usize] & base) >> (8 - width);
         values.push(value);
-        base = base << width;
+        base <<= width;
     }
 
     values
